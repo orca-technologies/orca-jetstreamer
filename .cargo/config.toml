@@ -2,6 +2,6 @@
 clickhouse-server = "run --release -p jetstreamer-utils --bin clickhouse-server"
 clickhouse-client = "run --release -p jetstreamer-utils --bin clickhouse-client"
 
-# fix for Tahoe
+# rustc 1.95 defaults to rust-lld, which rejects clang -fuse-ld= from ~/.cargo.
 [target.aarch64-apple-darwin]
-linker = "rust-lld"
+linker = "cc"

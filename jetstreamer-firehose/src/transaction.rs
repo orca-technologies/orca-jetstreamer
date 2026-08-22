@@ -137,7 +137,7 @@ mod wincode_schema {
         wincode::{
             ReadResult, SchemaRead, SchemaWrite, WriteResult,
             containers::{self, Pod},
-            error::invalid_tag_encoding,
+            error::{WriteError, invalid_tag_encoding},
             io::{Reader, Writer},
             len::ShortU16Len,
         },
@@ -209,6 +209,9 @@ mod wincode_schema {
                 solana_message::VersionedMessage::V0(message) => {
                     Ok(1 + V0Message::size_of(message)?)
                 }
+                solana_message::VersionedMessage::V1(_) => {
+                    Err(WriteError::Custom("VersionedMessage::V1 is not supported"))
+                }
             }
         }
 
@@ -221,6 +224,9 @@ mod wincode_schema {
                 solana_message::VersionedMessage::V0(message) => {
                     u8::write(writer, &MESSAGE_VERSION_PREFIX)?;
                     V0Message::write(writer, message)
+                }
+                solana_message::VersionedMessage::V1(_) => {
+                    Err(WriteError::Custom("VersionedMessage::V1 is not supported"))
                 }
             }
         }

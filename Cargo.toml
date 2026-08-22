@@ -30,7 +30,8 @@ verify-transaction-signatures = ["jetstreamer-firehose/verify-transaction-signat
 jetstreamer-firehose = { path = "jetstreamer-firehose", version = "0.7.0" }
 jetstreamer-plugin = { path = "jetstreamer-plugin", version = "0.7.0" }
 jetstreamer-utils = { path = "jetstreamer-utils", version = "0.7.0" }
-tokio = "1"
+tokio = "=1.53.1"
+five8_core = "=1.0.0"
 futures-util = { version = "0", default-features = false }
 futures = "0"
 log = "0"
@@ -54,32 +55,32 @@ crossbeam-utils = { version = "0", default-features = false }
 fnv = { version = "1", default-features = false }
 url = { version = "2", default-features = false }
 multihash = { version = "0", default-features = false }
-prost = { package = "prost", version = "0", default-features = false }
+prost = { package = "prost", version = "0.14", default-features = false }
 prost_011 = { package = "prost", version = "0.11" }
 protobuf-src = "1"
 serde = { version = "1", default-features = false }
 serde_cbor = "0"
-agave-geyser-plugin-interface = "3"
-solana-address = "1"
-solana-hash = "4"
+agave-geyser-plugin-interface = "=4.2.1"
+solana-address = "=2.6.1"
+solana-hash = "=4.5.0"
 solana-blake3-hasher = "=3.1.0"
 solana-epoch-rewards-hasher = "=3.1.0"
 solana-keccak-hasher = "=3.1.0"
-solana-logger = "3"
-solana-signature = { version = "3", default-features = false }
-solana-accounts-db = "3"
-solana-entry = "3"
-solana-ledger = "3"
-solana-geyser-plugin-manager = { version = "3", features = ["agave-unstable-api"] }
-solana-rpc = "3"
-solana-runtime = "3"
-solana-storage-proto = "3"
-solana-message = "3"
-solana-transaction = "3"
-solana-transaction-status = "3"
-solana-sdk-ids = "3"
-solana-reward-info = "3"
-solana-sysvar = "=3.0.0"
+solana-logger = "=3.0.0"
+solana-signature = { version = "=3.4.1", default-features = false }
+solana-accounts-db = { version = "=4.2.1", features = ["agave-unstable-api"] }
+solana-entry = "=4.2.1"
+solana-ledger = { version = "=4.2.1", features = ["agave-unstable-api"] }
+solana-geyser-plugin-manager = { version = "=4.2.1", features = ["agave-unstable-api"] }
+solana-rpc = { version = "=4.2.1", features = ["agave-unstable-api"] }
+solana-runtime = { version = "=4.2.1", features = ["agave-unstable-api"] }
+solana-storage-proto = "=4.2.1"
+solana-message = "=4.4.1"
+solana-transaction = "=4.1.6"
+solana-transaction-status = "=4.2.1"
+solana-sdk-ids = "=3.1.0"
+solana-reward-info = "=6.2.0"
+solana-sysvar = "=4.1.0"
 sha2 = "0.10"
 tonic = { version = "0", default-features = false }
 tonic-build = "0"
@@ -105,6 +106,7 @@ aws-smithy-types = "1"
 aws-types = "1"
 
 [dependencies]
+five8_core.workspace = true
 tokio.workspace = true
 solana-logger.workspace = true
 log.workspace = true
