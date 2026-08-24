@@ -1,6 +1,6 @@
+use crate::http_seek::Seekable;
 use reqwest::Client;
 use ripget::{WindowedDownload, WindowedDownloadOptions, download_url_windowed};
-use rseek::Seekable;
 use serde::Deserialize;
 use std::{fmt, io, pin::Pin};
 use tokio::io::{AsyncRead, AsyncSeek, BufReader, ReadBuf, SeekFrom};
