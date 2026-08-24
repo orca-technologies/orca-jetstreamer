@@ -87,8 +87,9 @@ tonic-build = "0"
 zstd = { version = "0", default-features = false }
 thousands = "0"
 tokio-stream = { version = "0", default-features = false }
+tokio-util = { version = "0.7", default-features = false }
+bytes = "1"
 rangemap = "1"
-rseek = "0.4"
 ripget = "0.3"
 rayon = "1"
 xxhash-rust = { version = "0.8", features = ["xxh64"] }

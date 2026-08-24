@@ -43,6 +43,8 @@ prost.workspace = true
 solana-entry.workspace = true
 reqwest = { workspace = true, features = ["json", "stream"] }
 tokio.workspace = true
+tokio-util = { workspace = true, features = ["io"] }
+bytes.workspace = true
 futures-util.workspace = true
 serde = { workspace = true, features = ["derive"] }
 thiserror.workspace = true
@@ -52,7 +54,6 @@ base64.workspace = true
 wincode.workspace = true
 solana-logger.workspace = true
 log.workspace = true
-rseek.workspace = true
 ripget.workspace = true
 crc.workspace = true
 serde_cbor.workspace = true
