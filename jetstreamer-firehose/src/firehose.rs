@@ -2277,8 +2277,13 @@ where
                                                 keyed_rewards,
                                                 num_partitions,
                                             } = std::mem::take(&mut this_block_rewards);
-                                            if slot > last_emitted_slot {
-                                                last_emitted_slot = slot;
+                                            // PossibleLeaderSkipped already advanced
+                                            // last_emitted_slot. A late real block for that
+                                            // slot must still emit Block (txs already did).
+                                            if cleared_pending_skip || slot > last_emitted_slot {
+                                                if slot > last_emitted_slot {
+                                                    last_emitted_slot = slot;
+                                                }
                                                 on_block_cb(
                                                     thread_index,
                                                     BlockData::Block {
