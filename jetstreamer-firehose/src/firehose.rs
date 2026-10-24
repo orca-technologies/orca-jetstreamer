@@ -558,7 +558,8 @@ fn reverse_resume_after_error(
 
 /// Per-thread restart pacing: consecutive failures on the same slot double the delay up to
 /// [`RETRY_BACKOFF_MAX`]; a failure on a different slot means forward progress was made and
-/// resets the sequence.
+/// resets the sequence. A slot that keeps failing past [`retry_budget`] ends the run with
+/// that error instead of retrying forever.
 struct RetryBackoff {
     last_slot: Option<u64>,
     consecutive: u32,
@@ -572,16 +573,32 @@ impl RetryBackoff {
         }
     }
 
-    fn next_delay(&mut self, slot: u64) -> std::time::Duration {
+    /// Records a failure at `slot` and returns how many failures in a row hit that slot.
+    fn record_failure(&mut self, slot: u64) -> u32 {
         if self.last_slot == Some(slot) {
             self.consecutive = self.consecutive.saturating_add(1);
         } else {
             self.last_slot = Some(slot);
             self.consecutive = 0;
         }
+        self.consecutive + 1
+    }
+
+    fn delay(&self) -> std::time::Duration {
         RETRY_BACKOFF_BASE
             .saturating_mul(1u32 << self.consecutive.min(5))
             .min(RETRY_BACKOFF_MAX)
+    }
+}
+
+/// Failures in a row at one slot before the run gives up. Re-reading the same bytes does not
+/// fix a node that fails to decode, so decoding errors get a few attempts (enough for a bad
+/// seek offset to clear after the index is invalidated); transport errors get about half an
+/// hour of backoff to ride out a CDN outage.
+fn retry_budget(err: &FirehoseError) -> u32 {
+    match err {
+        FirehoseError::NodeDecodingError(..) => 5,
+        _ => 60,
     }
 }
 
@@ -1465,6 +1482,9 @@ where
     };
 
     let mut handles = Vec::new();
+    // First error a thread gave up on; the run stops and returns it.
+    let fatal_error: Arc<std::sync::Mutex<Option<(FirehoseError, u64)>>> =
+        Arc::new(std::sync::Mutex::new(None));
     // Shared per-thread error counters
     let error_counts: Arc<Vec<AtomicU32>> =
         Arc::new((0..subranges.len()).map(|_| AtomicU32::new(0)).collect());
@@ -1640,6 +1660,7 @@ where
         let ripget_threads = sequential_download_threads;
         let ripget_buffer_window_bytes = sequential_buffer_window_bytes;
         let ripget_client = shared_ripget_client.clone();
+        let fatal_error = fatal_error.clone();
 
         let handle = tokio::spawn(async move {
             let transactions_since_stats = transactions_since_stats_cloned;
@@ -2670,6 +2691,19 @@ where
                     }
                     // Increment this thread's error counter
                     error_counts[thread_index].fetch_add(1, Ordering::Relaxed);
+                    let failures = retry_backoff.record_failure(slot);
+                    if failures >= retry_budget(&err) {
+                        log::error!(
+                            target: &log_target,
+                            "giving up: {} failures in a row at slot {} in epoch {}; stopping the firehose",
+                            failures,
+                            slot,
+                            epoch
+                        );
+                        shutdown_flag.store(true, Ordering::SeqCst);
+                        fatal_error.lock().unwrap().get_or_insert((err, slot));
+                        break;
+                    }
                     log::warn!(
                         target: &log_target,
                         "restarting from slot {} at index {}",
@@ -2713,7 +2747,7 @@ where
                 skip_until_index = None;
                 last_emitted_slot_global = last_emitted_slot;
                 if !recycled {
-                    let backoff = retry_backoff.next_delay(slot);
+                    let backoff = retry_backoff.delay();
                     log::warn!(
                         target: &log_target,
                         "backing off {:?} before restarting",
@@ -2762,6 +2796,10 @@ where
     }
     if let Some(monitor) = recycle_monitor {
         monitor.abort();
+    }
+    if let Some((err, slot)) = fatal_error.lock().unwrap().take() {
+        log::error!(target: LOG_MODULE, "🚒 firehose failed at slot {}: {}", slot, err);
+        return Err((err, slot));
     }
     // End-of-run coverage audit: the union of journaled intervals must cover every present
     // slot in the requested range. Skipped when the run was interrupted (holes are expected
@@ -3415,6 +3453,17 @@ async fn firehose_geyser_thread(
             // Increment this thread's error counter
             let idx = thread_index.unwrap_or(0);
             error_counts[idx].fetch_add(1, Ordering::Relaxed);
+            let failures = retry_backoff.record_failure(slot);
+            if failures >= retry_budget(&err) {
+                log::error!(
+                    target: &log_target,
+                    "giving up: {} failures in a row at slot {} in epoch {}",
+                    failures,
+                    slot,
+                    slot_to_epoch(slot)
+                );
+                return Err((err, slot));
+            }
             log::warn!(
                 target: &log_target,
                 "restarting from slot {} at index {}",
@@ -3432,7 +3481,7 @@ async fn firehose_geyser_thread(
             // is reset to 0 each epoch restart. Keeping it can skip large portions
             // of the stream and silently drop slots.
             skip_until_index = None;
-            let backoff = retry_backoff.next_delay(slot);
+            let backoff = retry_backoff.delay();
             log::warn!(
                 target: &log_target,
                 "backing off {:?} before restarting",
@@ -3474,22 +3523,31 @@ fn is_simple_vote_transaction(versioned_tx: &VersionedTransaction) -> bool {
 fn convert_proto_rewards(
     proto_rewards: &solana_storage_proto::convert::generated::Rewards,
 ) -> Result<KeyedRewardsAndNumPartitions, SharedError> {
+    // Newer Agave adds reward types the pinned `solana-reward-info` cannot represent
+    // (VATDebit = 6, BlockRevenueSharing = 7 from epoch 1064). Those rewards are dropped
+    // instead of failing the block; transactions and the rest of the rewards are unaffected.
+    static UNKNOWN_REWARD_TYPE_WARNED: std::sync::atomic::AtomicBool =
+        std::sync::atomic::AtomicBool::new(false);
     let mut keyed_rewards = Vec::with_capacity(proto_rewards.rewards.len());
     for proto_reward in proto_rewards.rewards.iter() {
-        let reward = StakeRewardInfo {
-            reward_type: match proto_reward.reward_type - 1 {
-                0 => RewardType::Fee,
-                1 => RewardType::Rent,
-                2 => RewardType::Staking,
-                3 => RewardType::Voting,
-                4 => RewardType::DeactivatedStake,
-                typ => {
-                    return Err(Box::new(std::io::Error::other(format!(
-                        "unsupported reward type {}",
-                        typ
-                    ))));
+        let reward_type = match proto_reward.reward_type {
+            1 => RewardType::Fee,
+            2 => RewardType::Rent,
+            3 => RewardType::Staking,
+            4 => RewardType::Voting,
+            5 => RewardType::DeactivatedStake,
+            typ => {
+                if !UNKNOWN_REWARD_TYPE_WARNED.swap(true, Ordering::Relaxed) {
+                    log::warn!(
+                        target: LOG_MODULE,
+                        "skipping rewards of unknown reward type {typ} (logged once)"
+                    );
                 }
-            },
+                continue;
+            }
+        };
+        let reward = StakeRewardInfo {
+            reward_type,
             lamports: proto_reward.lamports,
             post_balance: proto_reward.post_balance,
             // Blocks recorded before SIMD-0291 only carry a whole-percent commission; scale it
