@@ -1,34 +1,41 @@
+#[cfg(feature = "geyser")]
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use dashmap::{DashMap, DashSet};
 use futures_util::future::BoxFuture;
+#[cfg(feature = "geyser")]
 use reqwest::{Client, Url};
+#[cfg(feature = "geyser")]
 use solana_accounts_db::stake_rewards::StakeRewardInfo;
 use solana_address::Address;
+#[cfg(feature = "geyser")]
 use solana_geyser_plugin_manager::{
     block_metadata_notifier_interface::BlockMetadataNotifier,
     geyser_plugin_service::GeyserPluginServiceError,
 };
 use solana_hash::Hash;
+#[cfg(feature = "geyser")]
 use solana_ledger::entry_notifier_interface::EntryNotifier;
 use solana_reward_info::RewardType;
+#[cfg(feature = "geyser")]
 use solana_rpc::{
     optimistically_confirmed_bank_tracker::SlotNotification,
     transaction_notifier_interface::TransactionNotifier,
 };
+#[cfg(feature = "geyser")]
 use solana_runtime::bank::KeyedRewardsAndNumPartitions;
 use solana_sdk_ids::vote::id as vote_program_id;
 use solana_transaction::versioned::VersionedTransaction;
 use std::{
     fmt::Display,
-    future::Future,
     io,
     ops::Range,
-    path::PathBuf,
     sync::{
         Arc,
         atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
     },
 };
+#[cfg(feature = "geyser")]
+use std::{future::Future, path::PathBuf};
 use thiserror::Error;
 use tokio::{
     sync::{
@@ -611,8 +618,10 @@ pub enum FirehoseError {
     /// Failure while reading the Old Faithful CAR header.
     ReadHeader(SharedError),
     /// Error emitted by the Solana Geyser plugin service.
+    #[cfg(feature = "geyser")]
     GeyserPluginService(GeyserPluginServiceError),
     /// Transaction notifier could not be acquired from the Geyser service.
+    #[cfg(feature = "geyser")]
     FailedToGetTransactionNotifier,
     /// Failure while reading data until the next block boundary.
     ReadUntilBlockError(SharedError),
@@ -661,11 +670,13 @@ impl Display for FirehoseError {
             FirehoseError::ReadHeader(error) => {
                 write!(f, "Error reading header: {}", error)
             }
+            #[cfg(feature = "geyser")]
             FirehoseError::GeyserPluginService(geyser_plugin_service_error) => write!(
                 f,
                 "Error initializing geyser plugin service: {}",
                 geyser_plugin_service_error
             ),
+            #[cfg(feature = "geyser")]
             FirehoseError::FailedToGetTransactionNotifier => write!(
                 f,
                 "Failed to get transaction notifier from GeyserPluginService"
@@ -730,6 +741,7 @@ impl From<reqwest::Error> for FirehoseError {
     }
 }
 
+#[cfg(feature = "geyser")]
 impl From<GeyserPluginServiceError> for FirehoseError {
     fn from(e: GeyserPluginServiceError) -> Self {
         FirehoseError::GeyserPluginService(e)
@@ -921,12 +933,12 @@ fn decode_transaction_status_meta_from_frame(
 
 #[derive(Debug)]
 struct DecodedRewards {
-    /// Rewards in the runtime's representation, ready to hand to block handlers and the geyser
-    /// block metadata notifier without further conversion.
-    rewards: KeyedRewardsAndNumPartitions,
+    /// Rewards as handed to block and reward handlers.
+    rewards: BlockRewards,
     /// Whether the ledger recorded vote commission in basis points (SIMD-0291) rather than
     /// whole percent for this block. Forwarded to the geyser block metadata notifier so it
     /// renders `commission`/`commission_bps` the same way a live validator would have.
+    #[cfg_attr(not(feature = "geyser"), allow(dead_code))]
     commission_rate_in_basis_points: bool,
 }
 
@@ -939,31 +951,14 @@ impl Default for DecodedRewards {
 impl DecodedRewards {
     fn empty() -> Self {
         Self {
-            rewards: KeyedRewardsAndNumPartitions {
-                keyed_rewards: Vec::new(),
-                num_partitions: None,
-            },
+            rewards: BlockRewards::default(),
             commission_rate_in_basis_points: false,
         }
     }
 
     /// Copies the rewards into the form conveyed to reward [`Handler`] callbacks.
-    fn to_handler_rewards(&self) -> Vec<(Address, StakeRewardInfo)> {
-        self.rewards
-            .keyed_rewards
-            .iter()
-            .map(|(address, reward)| {
-                (
-                    *address,
-                    StakeRewardInfo {
-                        reward_type: reward.reward_type,
-                        lamports: reward.lamports,
-                        post_balance: reward.post_balance,
-                        commission_bps: reward.commission_bps,
-                    },
-                )
-            })
-            .collect()
+    fn to_handler_rewards(&self) -> Vec<(Address, BlockReward)> {
+        self.rewards.keyed_rewards.clone()
     }
 }
 
@@ -1269,11 +1264,53 @@ pub struct RewardsData {
     /// Slot the rewards correspond to.
     pub slot: u64,
     /// Reward recipients and their associated reward information.
-    ///
-    /// Agave 4.x no longer exports `solana_runtime`'s `RewardInfo`, so rewards are conveyed as
-    /// [`solana_accounts_db::stake_rewards::StakeRewardInfo`], which has the same fields and
-    /// converts into the runtime type.
-    pub rewards: Vec<(Address, StakeRewardInfo)>,
+    pub rewards: Vec<(Address, BlockReward)>,
+}
+
+/// One reward recorded in a block. Same fields as the runtime's `RewardInfo`, kept local so
+/// streaming rewards does not pull in `solana-runtime` (the `geyser` feature converts it).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BlockReward {
+    /// Reward category.
+    pub reward_type: RewardType,
+    /// Reward amount in lamports (negative for debits).
+    pub lamports: i64,
+    /// Account balance in lamports after the reward was applied.
+    pub post_balance: u64,
+    /// Vote account commission in basis points, when recorded.
+    pub commission_bps: Option<u16>,
+}
+
+/// Rewards of one block keyed by recipient, with the partition count when the block recorded one.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BlockRewards {
+    /// Reward recipients and their rewards.
+    pub keyed_rewards: Vec<(Address, BlockReward)>,
+    /// Number of partitions for partitioned epoch rewards.
+    pub num_partitions: Option<u64>,
+}
+
+#[cfg(feature = "geyser")]
+impl BlockRewards {
+    /// Converts into the runtime type the geyser block metadata notifier takes.
+    fn to_runtime(&self) -> KeyedRewardsAndNumPartitions {
+        KeyedRewardsAndNumPartitions {
+            keyed_rewards: self
+                .keyed_rewards
+                .iter()
+                .map(|(address, reward)| {
+                    let reward = StakeRewardInfo {
+                        reward_type: reward.reward_type,
+                        lamports: reward.lamports,
+                        post_balance: reward.post_balance,
+                        commission_bps: reward.commission_bps,
+                    };
+                    (*address, reward.into())
+                })
+                .collect(),
+            num_partitions: self.num_partitions,
+        }
+    }
 }
 
 /// Block-level data streamed to block handlers.
@@ -1290,7 +1327,7 @@ pub enum BlockData {
         /// Current block hash.
         blockhash: Hash,
         /// Rewards keyed by account and partition information.
-        rewards: KeyedRewardsAndNumPartitions,
+        rewards: BlockRewards,
         /// Optional Unix timestamp for the block.
         block_time: Option<i64>,
         /// Optional ledger block height.
@@ -2890,6 +2927,7 @@ where
     Ok(())
 }
 
+#[cfg(feature = "geyser")]
 #[allow(clippy::result_large_err)]
 /// Builds a Geyser-backed firehose and returns a slot notification stream.
 ///
@@ -3021,6 +3059,7 @@ pub fn firehose_geyser(
     Ok(confirmed_bank_receiver)
 }
 
+#[cfg(feature = "geyser")]
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::result_large_err)]
 async fn firehose_geyser_thread(
@@ -3356,7 +3395,7 @@ async fn firehose_geyser_thread(
                                     todo_previous_blockhash.to_string().as_str(),
                                     block.slot,
                                     todo_latest_entry_blockhash.to_string().as_str(),
-                                    &decoded_rewards.rewards,
+                                    &decoded_rewards.rewards.to_runtime(),
                                     Some(block.meta.blocktime as i64),
                                     block.meta.block_height,
                                     this_block_executed_transaction_count,
@@ -3522,7 +3561,7 @@ fn is_simple_vote_transaction(versioned_tx: &VersionedTransaction) -> bool {
 #[inline(always)]
 fn convert_proto_rewards(
     proto_rewards: &solana_storage_proto::convert::generated::Rewards,
-) -> Result<KeyedRewardsAndNumPartitions, SharedError> {
+) -> Result<BlockRewards, SharedError> {
     // Newer Agave adds reward types the pinned `solana-reward-info` cannot represent
     // (VATDebit = 6, BlockRevenueSharing = 7 from epoch 1064). Those rewards are dropped
     // instead of failing the block; transactions and the rest of the rewards are unaffected.
@@ -3546,7 +3585,7 @@ fn convert_proto_rewards(
                 continue;
             }
         };
-        let reward = StakeRewardInfo {
+        let reward = BlockReward {
             reward_type,
             lamports: proto_reward.lamports,
             post_balance: proto_reward.post_balance,
@@ -3564,9 +3603,9 @@ fn convert_proto_rewards(
             .pubkey
             .parse::<Address>()
             .map_err(|err| Box::new(err) as SharedError)?;
-        keyed_rewards.push((pubkey, reward.into()));
+        keyed_rewards.push((pubkey, reward));
     }
-    Ok(KeyedRewardsAndNumPartitions {
+    Ok(BlockRewards {
         keyed_rewards,
         num_partitions: proto_rewards
             .num_partitions

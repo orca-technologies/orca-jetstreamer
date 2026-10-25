@@ -286,12 +286,11 @@ async fn backfill_pubkey_timestamps(db: Arc<Client>) -> Result<(), clickhouse::e
 mod tests {
     use super::*;
     use crate::Plugin;
-    use jetstreamer_firehose::firehose::{BlockData, TransactionData};
+    use jetstreamer_firehose::firehose::{BlockData, BlockRewards, TransactionData};
     use serial_test::serial;
     use solana_hash::Hash;
     use solana_message::VersionedMessage;
     use solana_message::legacy::Message as LegacyMessage;
-    use solana_runtime::bank::KeyedRewardsAndNumPartitions;
     use solana_transaction::versioned::VersionedTransaction;
     use solana_transaction_status::TransactionStatusMeta;
 
@@ -334,10 +333,7 @@ mod tests {
             parent_slot: slot.saturating_sub(1),
             blockhash: Hash::default(),
             parent_blockhash: Hash::default(),
-            rewards: KeyedRewardsAndNumPartitions {
-                keyed_rewards: vec![],
-                num_partitions: None,
-            },
+            rewards: BlockRewards::default(),
             block_time,
             block_height: Some(slot),
             executed_transaction_count: 0,

@@ -4124,7 +4124,6 @@ dependencies = [
  "solana-address 2.6.1",
  "solana-hash 4.5.0",
  "solana-message",
- "solana-runtime",
  "solana-sdk-ids",
  "solana-transaction",
  "solana-transaction-status",

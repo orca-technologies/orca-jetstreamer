@@ -12,6 +12,18 @@ documentation.workspace = true
 
 [features]
 default = []
+# In-process Geyser plugins (`firehose_geyser`) and the `jetstreamer-firehose` binary. Pulls
+# the Agave validator stack (solana-ledger · solana-runtime · solana-rpc), so it is opt-in.
+geyser = [
+    "dep:crossbeam-channel",
+    "crossbeam-channel/std",
+    "dep:solana-accounts-db",
+    "dep:solana-entry",
+    "dep:solana-geyser-plugin-manager",
+    "dep:solana-ledger",
+    "dep:solana-rpc",
+    "dep:solana-runtime",
+]
 verify-transaction-signatures = []
 s3-backend = [
     "aws-credential-types",
@@ -23,25 +35,27 @@ s3-backend = [
 [[bin]]
 name = "jetstreamer-firehose"
 path = "src/main.rs"
+required-features = ["geyser"]
 
 [dependencies]
-crossbeam-channel.workspace = true
+crossbeam-channel = { workspace = true, optional = true }
 serial_test.workspace = true
-solana-rpc.workspace = true
-solana-runtime.workspace = true
+solana-rpc = { workspace = true, optional = true }
+solana-runtime = { workspace = true, optional = true }
 solana-hash.workspace = true
-solana-geyser-plugin-manager.workspace = true
-solana-storage-proto.workspace = true
+solana-geyser-plugin-manager = { workspace = true, optional = true }
+solana-storage-proto = { workspace = true, features = ["agave-unstable-api"] }
 solana-address.workspace = true
 solana-transaction.workspace = true
-solana-message.workspace = true
+# blake3: `VersionedMessage::hash` for `TransactionData::message_hash`.
+solana-message = { workspace = true, features = ["blake3"] }
 solana-transaction-status.workspace = true
-solana-ledger.workspace = true
+solana-ledger = { workspace = true, optional = true }
 solana-signature.workspace = true
 solana-sdk-ids.workspace = true
-solana-accounts-db.workspace = true
+solana-accounts-db = { workspace = true, optional = true }
 prost_014.workspace = true
-solana-entry.workspace = true
+solana-entry = { workspace = true, optional = true }
 reqwest = { workspace = true, features = ["json", "stream"] }
 tokio.workspace = true
 tokio-util = { workspace = true, features = ["io"] }

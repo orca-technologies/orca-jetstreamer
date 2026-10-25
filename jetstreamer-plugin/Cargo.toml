@@ -15,7 +15,7 @@ jetstreamer-firehose.workspace = true
 serde.workspace = true
 solana-message.workspace = true
 solana-address.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
 log.workspace = true
 clickhouse.workspace = true
 futures-util.workspace = true
@@ -32,4 +32,3 @@ serial_test.workspace = true
 solana-hash.workspace = true
 solana-transaction.workspace = true
 solana-transaction-status.workspace = true
-solana-runtime.workspace = true
