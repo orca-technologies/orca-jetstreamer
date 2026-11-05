@@ -1712,7 +1712,6 @@ where
             );
             let log_target = format!("{}::T{:03}", LOG_MODULE, thread_index);
             let mut skip_until_index = None;
-            let last_emitted_slot = slot_range.start.saturating_sub(1);
             let block_enabled = on_block.is_some();
             let tx_enabled = on_tx.is_some();
             let entry_enabled = on_entry.is_some();
@@ -2782,7 +2781,11 @@ where
                 // is reset to 0 each epoch restart. Keeping it can skip large portions
                 // of the stream and silently drop slots.
                 skip_until_index = None;
-                last_emitted_slot_global = last_emitted_slot;
+                // The next pass resumes at `slot_range.start`; every block below it was already
+                // emitted, so emission restarts just below the resume point. Seeding it from the
+                // thread's spawn-time range start instead suppressed every block callback of a
+                // stolen range below that start after a recycle or retry (transactions kept flowing).
+                last_emitted_slot_global = slot_range.start.saturating_sub(1);
                 if !recycled {
                     let backoff = retry_backoff.delay();
                     log::warn!(
